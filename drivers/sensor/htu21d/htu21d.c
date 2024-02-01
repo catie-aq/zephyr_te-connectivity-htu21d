@@ -1,0 +1,146 @@
+/* htu21d.c - Driver for TE-Connectivity HTU21D temperature and humidity sensor */
+
+/*
+ * Copyright (c) 2024 CATIE
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
+ * This sensor needs at most 15ms after power-up for reaching idle state, i.e.,
+ * to be ready for accepting commands (cf. datasheet, page 9).
+ * A soft reset is recommended after power-up (cf. datasheet, page 13).
+ *
+ * Datasheet:
+ * https://www.te.com/commerce/DocumentDelivery/DDEController?Action=showdoc&DocId=Data+Sheet%7FHPC199_6%7FA6%7Fpdf%7FEnglish%7FENG_DS_HPC199_6_A6.pdf%7FCAT-HSC0004
+ */
+
+#define DT_DRV_COMPAT te_connectivity_htu21d
+
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/sys/crc.h>
+
+LOG_MODULE_REGISTER(HTU21D, CONFIG_SENSOR_LOG_LEVEL);
+
+/* HTU21D commands and register addresses */
+#define HTU21D_CMD_TRIGGER_TEMP_MEASURE_HOLD       0xE3
+#define HTU21D_CMD_TRIGGER_HUMIDITY_MEASURE_HOLD   0xE5
+#define HTU21D_CMD_TRIGGER_TEMP_MEASURE_NOHOLD     0xF3
+#define HTU21D_CMD_TRIGGER_HUMIDITY_MEASURE_NOHOLD 0xF5
+#define HTU21D_CMD_WRITE_USER_REG                  0xE6
+#define HTU21D_CMD_READ_USER_REG                   0xE7
+#define HTU21D_CMD_SOFT_RESET                      0xFE
+
+/* HTU21D CRC characteristics */
+#define HTU21D_CRC_POLY     0x31 /* CRC-8, Maximal 8-bit polynomial X8+X5+X4+1 */
+#define HTU21D_CRC_INIT     0x00
+#define HTU21D_CRC_REVERSED false
+
+struct htu21d_config {
+	struct i2c_dt_spec i2c;
+};
+
+struct htu21d_data {
+	uint16_t humidity;
+	uint16_t temp;
+};
+
+static int htu21d_sample_fetch(const struct device *dev, enum sensor_channel chan)
+{
+	struct htu21d_data *dev_data = dev->data;
+	const struct htu21d_cfg *dev_cfg = dev->config;
+
+	__ASSERT_NO_MSG(chan == SENSOR_CHAN_ALL);
+
+	uint8_t buf[3];
+	uint8_t crc;
+	int ret;
+	int size = 3;
+
+	ret = i2c_burst_read_dt(&dev_cfg->i2c, HTU21D_CMD_TRIGGER_TEMP_MEASURE_HOLD, buf, size);
+	if (!ret) {
+		crc = crc8(buf, 2, HTU21D_CRC_POLY, HTU21D_CRC_INIT, HTU21D_CRC_REVERSED);
+		if (crc != buf[2]) {
+			LOG_ERR("CRC error");
+			return -EIO;
+		}
+		dev_data->temp = (buf[0] << 8) | buf[1] & 0xFFFC; /* Clear status bits */
+	}
+
+	ret = i2c_burst_read_dt(&dev_cfg->i2c, HTU21D_CMD_TRIGGER_HUMIDITY_MEASURE_HOLD, buf, size);
+	if (!ret) {
+		crc = crc8(buf, 2, HTU21D_CRC_POLY, HTU21D_CRC_INIT, HTU21D_CRC_REVERSED);
+		if (crc != buf[2]) {
+			LOG_ERR("CRC error");
+			return -EIO;
+		}
+		dev_data->humidity = (buf[0] << 8) | buf[1] & 0xFFFC; /* Clear status bits */
+	}
+
+	return ret;
+}
+
+static int htu21d_channel_get(const struct device *dev, enum sensor_channel chan,
+			      struct sensor_value *val)
+{
+	struct htu21d_data *data = dev->data;
+
+	switch (chan) {
+	case SENSOR_CHAN_AMBIENT_TEMP:
+		/* Temperature conversion in degrees Celsius
+		 * T = -46.85 + 175.72 * (sample/2^16)
+		 * LSB = 0.0026812744 degrees Celsius
+		 * Everything is multiplied by 10^7 to maximize precision.
+		 * Final result is scaled back to 10^6.
+		 */
+		val->val1 = (-468500000 + (dev_data->temp * 26813)) / 10000000;
+		val->val2 = ((-468500000 + (dev_data->temp * 26813)) % 10000000) / 10;
+		break;
+	case SENSOR_CHAN_HUMIDITY:
+		/* Relative humidity conversion in percent
+		 * RH = -6 + 125 * (sample/2^16)
+		 * LSB = 0.0019073486 percent
+		 * Everything is multiplied by 10^7 to maximize precision.
+		 * Final result is scaled back to 10^6.
+		 */
+		/* val->val1 =  (-60000000 + (dev_data->humidity * 19073)) / 10000000; */
+		/* val->val2 = ((-60000000 + (dev_data->humidity * 19073)) % 10000000) / 10; */
+		int32_t data = -60000000 + (dev_data->humidity * 19073);
+		val->val1 = data / 10000000;
+		val->val2 = (data - val->val1 * 10000000) / 10;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int htu21d_init(const struct device *dev)
+{
+	const struct htu21d_cfg *cfg = dev->config;
+
+	if (!i2c_is_ready_dt(&cfg->i2c)) {
+		LOG_ERR("I2C bus %s not ready", cfg->i2c.bus->name);
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
+static const struct sensor_driver_api htu21d_driver_api = {
+	.sample_fetch = htu21d_sample_fetch,
+	.channel_get = htu21d_channel_get,
+};
+
+#define HTU21D_INIT(n)                                                                             \
+	static struct htu21d_cfg htu21d_config_##n = {                                             \
+		.i2c = I2C_DT_SPEC_INST_GET(n),                                                    \
+	};                                                                                         \
+	static struct htu21d_data htu21d_data_##n;                                                 \
+	DEVICE_DT_INST_DEFINE(n, htu21d_init, NULL, &htu21d_data_##n, &htu21d_config_##n,          \
+			      POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, &htu21d_driver_api);
+
+DT_INST_FOREACH_STATUS_OKAY(HTU21D_INIT)
