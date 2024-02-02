@@ -7,18 +7,15 @@
  */
 
 /*
- * This sensor needs at most 15ms after power-up for reaching idle state, i.e.,
- * to be ready for accepting commands (cf. datasheet, page 9).
- * A soft reset is recommended after power-up (cf. datasheet, page 13).
- *
  * Datasheet:
  * https://www.te.com/commerce/DocumentDelivery/DDEController?Action=showdoc&DocId=Data+Sheet%7FHPC199_6%7FA6%7Fpdf%7FEnglish%7FENG_DS_HPC199_6_A6.pdf%7FCAT-HSC0004
  */
 
 #define DT_DRV_COMPAT te_connectivity_htu21d
 
-#include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/crc.h>
 
@@ -105,11 +102,13 @@ static int htu21d_channel_get(const struct device *dev, enum sensor_channel chan
 		 * Everything is multiplied by 10^7 to maximize precision.
 		 * Final result is scaled back to 10^6.
 		 */
-		/* val->val1 =  (-60000000 + (dev_data->humidity * 19073)) / 10000000; */
-		/* val->val2 = ((-60000000 + (dev_data->humidity * 19073)) % 10000000) / 10; */
-		int32_t data = -60000000 + (dev_data->humidity * 19073);
-		val->val1 = data / 10000000;
-		val->val2 = (data - val->val1 * 10000000) / 10;
+		val->val1 = (-60000000 + (dev_data->humidity * 19073)) / 10000000;
+		val->val2 = ((-60000000 + (dev_data->humidity * 19073)) % 10000000) / 10;
+
+		/* Alternative calculation, may be faster */
+		/* int32_t data = -60000000 + (dev_data->humidity * 19073); */
+		/* val->val1 = data / 10000000; */
+		/* val->val2 = (data - val->val1 * 10000000) / 10; */
 		break;
 	default:
 		return -EINVAL;
@@ -121,11 +120,22 @@ static int htu21d_channel_get(const struct device *dev, enum sensor_channel chan
 static int htu21d_init(const struct device *dev)
 {
 	const struct htu21d_cfg *cfg = dev->config;
+	int err;
 
-	if (!i2c_is_ready_dt(&cfg->i2c)) {
-		LOG_ERR("I2C bus %s not ready", cfg->i2c.bus->name);
-		return -ENODEV;
+	err = i2c_is_ready_dt(&cfg->i2c);
+	if (err < 0) {
+		LOG_ERR("I2C bus %s not ready: %d", cfg->i2c.bus->name, err);
+		return err;
 	}
+
+	/* Soft reset */
+	char buf[1] = {HTU21D_CMD_SOFT_RESET};
+	err = i2c_write_dt(&cfg->i2c, buf, 1);
+	if (err < 0) {
+		LOG_ERR("Failed to reset sensor: %d", err);
+		return err;
+	}
+	k_sleep(K_MSEC(15)); /* Wait for sensor to reset, cf. datasheet, page 12 */
 
 	return 0;
 }

@@ -3,4 +3,4 @@
 
 zephyr_library()
 
-zephyr_library_sources(te-connectivity_htu21d)
+zephyr_library_sources(htu21d.c)
