@@ -47,7 +47,7 @@ struct htu21d_data {
 static int htu21d_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
 	struct htu21d_data *dev_data = dev->data;
-	const struct htu21d_cfg *dev_cfg = dev->config;
+	const struct htu21d_config *dev_config = dev->config;
 
 	__ASSERT_NO_MSG(chan == SENSOR_CHAN_ALL);
 
@@ -56,24 +56,25 @@ static int htu21d_sample_fetch(const struct device *dev, enum sensor_channel cha
 	int ret;
 	int size = 3;
 
-	ret = i2c_burst_read_dt(&dev_cfg->i2c, HTU21D_CMD_TRIGGER_TEMP_MEASURE_HOLD, buf, size);
+	ret = i2c_burst_read_dt(&dev_config->i2c, HTU21D_CMD_TRIGGER_TEMP_MEASURE_HOLD, buf, size);
 	if (!ret) {
 		crc = crc8(buf, 2, HTU21D_CRC_POLY, HTU21D_CRC_INIT, HTU21D_CRC_REVERSED);
 		if (crc != buf[2]) {
 			LOG_ERR("CRC error");
 			return -EIO;
 		}
-		dev_data->temp = (buf[0] << 8) | buf[1] & 0xFFFC; /* Clear status bits */
+		dev_data->temp = ((buf[0] << 8) | buf[1]) & 0xFFFC; /* Clear status bits */
 	}
 
-	ret = i2c_burst_read_dt(&dev_cfg->i2c, HTU21D_CMD_TRIGGER_HUMIDITY_MEASURE_HOLD, buf, size);
+	ret = i2c_burst_read_dt(&dev_config->i2c, HTU21D_CMD_TRIGGER_HUMIDITY_MEASURE_HOLD, buf,
+				size);
 	if (!ret) {
 		crc = crc8(buf, 2, HTU21D_CRC_POLY, HTU21D_CRC_INIT, HTU21D_CRC_REVERSED);
 		if (crc != buf[2]) {
 			LOG_ERR("CRC error");
 			return -EIO;
 		}
-		dev_data->humidity = (buf[0] << 8) | buf[1] & 0xFFFC; /* Clear status bits */
+		dev_data->humidity = ((buf[0] << 8) | buf[1]) & 0xFFFC; /* Clear status bits */
 	}
 
 	return ret;
@@ -92,8 +93,8 @@ static int htu21d_channel_get(const struct device *dev, enum sensor_channel chan
 		 * Everything is multiplied by 10^7 to maximize precision.
 		 * Final result is scaled back to 10^6.
 		 */
-		val->val1 = (-468500000 + (dev_data->temp * 26813)) / 10000000;
-		val->val2 = ((-468500000 + (dev_data->temp * 26813)) % 10000000) / 10;
+		val->val1 = (-468500000 + (data->temp * 26813)) / 10000000;
+		val->val2 = ((-468500000 + (data->temp * 26813)) % 10000000) / 10;
 		break;
 	case SENSOR_CHAN_HUMIDITY:
 		/* Relative humidity conversion in percent
@@ -102,13 +103,8 @@ static int htu21d_channel_get(const struct device *dev, enum sensor_channel chan
 		 * Everything is multiplied by 10^7 to maximize precision.
 		 * Final result is scaled back to 10^6.
 		 */
-		val->val1 = (-60000000 + (dev_data->humidity * 19073)) / 10000000;
-		val->val2 = ((-60000000 + (dev_data->humidity * 19073)) % 10000000) / 10;
-
-		/* Alternative calculation, may be faster */
-		/* int32_t data = -60000000 + (dev_data->humidity * 19073); */
-		/* val->val1 = data / 10000000; */
-		/* val->val2 = (data - val->val1 * 10000000) / 10; */
+		val->val1 = (-60000000 + (data->humidity * 19073)) / 10000000;
+		val->val2 = ((-60000000 + (data->humidity * 19073)) % 10000000) / 10;
 		break;
 	default:
 		return -EINVAL;
@@ -119,18 +115,18 @@ static int htu21d_channel_get(const struct device *dev, enum sensor_channel chan
 
 static int htu21d_init(const struct device *dev)
 {
-	const struct htu21d_cfg *cfg = dev->config;
+	const struct htu21d_config *config = dev->config;
 	int err;
 
-	err = i2c_is_ready_dt(&cfg->i2c);
+	err = i2c_is_ready_dt(&config->i2c);
 	if (err < 0) {
-		LOG_ERR("I2C bus %s not ready: %d", cfg->i2c.bus->name, err);
+		LOG_ERR("I2C bus %s not ready: %d", config->i2c.bus->name, err);
 		return err;
 	}
 
 	/* Soft reset */
 	char buf[1] = {HTU21D_CMD_SOFT_RESET};
-	err = i2c_write_dt(&cfg->i2c, buf, 1);
+	err = i2c_write_dt(&config->i2c, buf, 1);
 	if (err < 0) {
 		LOG_ERR("Failed to reset sensor: %d", err);
 		return err;
@@ -146,7 +142,7 @@ static const struct sensor_driver_api htu21d_driver_api = {
 };
 
 #define HTU21D_INIT(n)                                                                             \
-	static struct htu21d_cfg htu21d_config_##n = {                                             \
+	static struct htu21d_config htu21d_config_##n = {                                          \
 		.i2c = I2C_DT_SPEC_INST_GET(n),                                                    \
 	};                                                                                         \
 	static struct htu21d_data htu21d_data_##n;                                                 \

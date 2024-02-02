@@ -10,7 +10,7 @@
 
 int main(void)
 {
-	const struct device *const dev = DEVICE_DT_GET_ANY(htu21d);
+	const struct device *const dev = DEVICE_DT_GET_ANY(te_connectivity_htu21d);
 	struct sensor_value temp;
 	struct sensor_value humidity;
 
