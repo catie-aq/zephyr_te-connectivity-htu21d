@@ -4,3 +4,4 @@
 zephyr_library()
 
 zephyr_library_sources(htu21d.c)
+zephyr_include_directories(.)

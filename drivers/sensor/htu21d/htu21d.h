@@ -1,0 +1,14 @@
+/*
+ * Copyright (c) 2024, CATIE
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef ZEPHYR_DRIVERS_SENSOR_HTU21D_HTU21D_H_
+#define ZEPHYR_DRIVERS_SENSOR_HTU21D_HTU21D_H_
+
+enum htu21d_channel {
+	HTU21D_CHAN_DEW_POINT_TEMP = SENSOR_CHAN_PRIV_START,
+};
+
+#endif /* ZEPHYR_DRIVERS_SENSOR_HTU21D_HTU21D_H_ */

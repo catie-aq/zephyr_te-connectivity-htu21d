@@ -13,11 +13,15 @@
 
 #define DT_DRV_COMPAT te_connectivity_htu21d
 
+#include <math.h>
+
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/crc.h>
+
+#include "htu21d.h"
 
 LOG_MODULE_REGISTER(HTU21D, CONFIG_SENSOR_LOG_LEVEL);
 
@@ -105,6 +109,23 @@ static int htu21d_channel_get(const struct device *dev, enum sensor_channel chan
 		 */
 		val->val1 = (-60000000 + (data->humidity * 19073)) / 10000000;
 		val->val2 = ((-60000000 + (data->humidity * 19073)) % 10000000) / 10;
+		break;
+	case HTU21D_CHAN_DEW_POINT_TEMP:
+		/* Dew point temperature conversion in degrees Celsius
+		 * First, compute partial pressure from temperature:
+		 * PP = 10^(8.1332 - 1762.39 / (T + 235.66))
+		 * Then, compute dew point temperature:
+		 * Td = -(1762.39 / (log10(RH * PP / 100) - 8.1332) + 235.66)
+		 */
+		double temperature = -46.85 + 175.72 * (data->temp / 65536.0);
+		double humidity = -6 + 125 * (data->humidity / 65536.0);
+		double partial_pressure = pow(10, (8.1332 - 1762.39 / (temperature + 235.66)));
+		double dew_point =
+			-(1762.39 / (log10(humidity * partial_pressure / 100) - 8.1332) + 235.66);
+		LOG_DBG("T: %f, RH: %f, PP: %f, Td: %f", temperature, humidity, partial_pressure,
+			dew_point);
+		val->val1 = dew_point;
+		val->val2 = (dew_point - val->val1) * 1000000;
 		break;
 	default:
 		return -EINVAL;
