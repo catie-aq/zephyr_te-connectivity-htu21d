@@ -124,8 +124,7 @@ static int htu21d_channel_get(const struct device *dev, enum sensor_channel chan
 			-(1762.39 / (log10(humidity * partial_pressure / 100) - 8.1332) + 235.66);
 		LOG_DBG("T: %f, RH: %f, PP: %f, Td: %f", temperature, humidity, partial_pressure,
 			dew_point);
-		val->val1 = dew_point;
-		val->val2 = (dew_point - val->val1) * 1000000;
+		sensor_value_from_double(val, dew_point);
 		break;
 	default:
 		return -EINVAL;
