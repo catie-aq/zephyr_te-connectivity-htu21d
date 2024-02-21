@@ -8,5 +8,6 @@ menuconfig HTU21D
     default y
     depends on DT_HAS_TE_CONNECTIVITY_HTU21D_ENABLED
     select I2C
+    select CRC
     help
       Enable driver for TE Connectivity HTU21D humidity and temperature sensor.
