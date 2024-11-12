@@ -3,7 +3,7 @@
 # Copyright (c) 2024 CATIE
 # SPDX-License-Identifier: Apache-2.0
 
-menuconfig HTU21D
+config HTU21D
     bool "HTU21D humidity and temperature sensor"
     default y
     depends on DT_HAS_TE_CONNECTIVITY_HTU21D_ENABLED
