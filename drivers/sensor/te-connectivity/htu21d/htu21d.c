@@ -136,7 +136,7 @@ static int htu21d_init(const struct device *dev)
 	return 0;
 }
 
-static const struct sensor_driver_api htu21d_driver_api = {
+static DEVICE_API(sensor, htu21d_driver_api) = {
 	.sample_fetch = htu21d_sample_fetch,
 	.channel_get = htu21d_channel_get,
 };
